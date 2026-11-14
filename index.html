@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>おえかき迷路</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f8ff;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            color: #333;
+            font-size: 2rem;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1rem;
+            margin: 0 10px;
+            cursor: pointer;
+            border-radius: 20px;
+            border: 2px solid #4a90e2;
+            background-color: white;
+            color: #4a90e2;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background-color: #4a90e2;
+            color: white;
+        }
+        canvas {
+            background-color: white;
+            border: 5px solid #333;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            max-width: 100%;
+            height: auto;
+            touch-action: none;
+        }
+    
+        .footer-buttons {
+            margin-top: 20px;
+            margin-bottom: 30px;
+        }
+        .parent-info {
+            margin-top: 40px;
+            padding: 20px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            max-width: 600px;
+            text-align: left;
+            font-size: 0.9rem;
+            color: #666;
+        }
+        .parent-info h3 {
+            margin-top: 0;
+            color: #444;
+        }
+        @media (max-width: 600px) {
+            button {
+                padding: 14px 24px;
+                font-size: 1.2rem;
+            }
+            body {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    
+    <h1>おえかき迷路</h1>
+    
+    <div class="controls">
+        <button onclick="initGame('easy')">かんたん</button>
+        <button onclick="initGame('normal')">ふつう</button>
+        <button onclick="initGame('hard')">むずかしい</button>
+    </div>
+    
+    <div id="message" style="font-size: 1.5rem; color: #e74c3c; font-weight: bold; min-height: 1.5em;"></div>
+    
+    <canvas id="mazeCanvas"></canvas>
+    
+    <div class="footer-buttons">
+        <button onclick="retryDraw()">もう一度描く</button>
+        <button onclick="nextStage()">つぎのステージ</button>
+    </div>
+    
+    <div class="parent-info">
+        <h3>保護者の方へ</h3>
+        <p>このゲームは、お子様が迷路の構造を理解し、パズル感覚を楽しむために設計されています。ボタンを押すことで、毎回新しい迷路のパターンが自動で生成されます。現在は描画と自動生成の段階です。</p>
+    </div>
+    
+    <script>
+        const canvas = document.getElementById('mazeCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let maze = [];
+        let rows, cols;
+        let currentDifficulty = 'normal';
+        let cell_size = 20;
+        
+        // Step 2: なぞり描きの状態
+        let drawing = false;
+        let strokeLen = 0;
+        let goalReached = false;
+        let lastPos = null;
+        let strokeSegments = []; // 描いた線の履歴（紙吹雪アニメ中も再描画するため）
+        let decorations = []; // ランダム絵文字
+        let particles = [];
+        let animationId = null;
+        let audioCtx = null;
+
+        const config = {
+            easy: { rows: 9, cols: 9, cellSize: 30 },
+            normal: { rows: 15, cols: 15, cellSize: 25 },
+            hard: { rows: 21, cols: 21, cellSize: 20 }
+        };
+    
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+    
+        function playFanfare() {
+            if (!audioCtx) return;
+            const notes = [261.63, 329.63, 392.00, 523.25]; // C4, E4, G4, C5
+            notes.forEach((freq, i) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime + i * 0.2);
+                
+                gain.gain.setValueAtTime(0, audioCtx.currentTime + i * 0.2);
+                gain.gain.linearToValueAtTime(0.2, audioCtx.currentTime + i * 0.2 + 0.05);
+                gain.gain.linearToValueAtTime(0, audioCtx.currentTime + i * 0.2 + 0.2);
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.start(audioCtx.currentTime + i * 0.2);
+                osc.stop(audioCtx.currentTime + i * 0.2 + 0.2);
+            });
+        }
+    
+        function initGame(difficulty) {
+            currentDifficulty = difficulty;
+            const settings = config[difficulty];
+            rows = settings.rows;
+            cols = settings.cols;
+            cell_size = settings.cellSize;
+            
+            canvas.width = cols * cell_size;
+            canvas.height = rows * cell_size;
+            
+            generateMaze();
+            pickDecorations();
+            resetStrokeState();
+            drawMaze();
+            
+            // Reset particles/animation
+            particles = [];
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+        }
+    
+        function generateMaze() {
+            // 1 = Wall, 0 = Passage
+            maze = Array.from({ length: rows }, () => Array(cols).fill(1));
+    
+            // Recursive backtracker algorithm
+            function carve(r, c) {
+                maze[r][c] = 0;
+                const directions = [
+                    [0, 2], [0, -2], [2, 0], [-2, 0]
+                ].sort(() => Math.random() - 0.5);
+    
+                for (let [dr, dc] of directions) {
+                    const nr = r + dr;
+                    const nc = c + dc;
+                    if (nr > 0 && nr < rows - 1 && nc > 0 && nc < cols - 1 && maze[nr][nc] === 1) {
+                        maze[r + dr / 2][c + dc / 2] = 0;
+                        carve(nr, nc);
+                    }
+                }
+            }
+    
+            carve(1, 1);
+            
+            // Ensure Start and End are paths
+            maze[1][1] = 0;
+            maze[rows - 2][cols - 2] = 0;
+        }
+    
+        // Step 2: 通路セルにランダム絵文字を配置
+        function pickDecorations() {
+            const emojis = ['🐻', '🐱', '⭐', '🚗', '🌳', '🐭', '🎈'];
+            decorations = [];
+            const open = [];
+            for (let r = 1; r < rows - 1; r++) {
+                for (let c = 1; c < cols - 1; c++) {
+                    if (maze[r][c] === 0 && !(r === 1 && c === 1) && !(r === rows - 2 && c === cols - 2)) {
+                        open.push([r, c]);
+                    }
+                }
+            }
+            // シャッフルして最大6個
+            open.sort(() => Math.random() - 0.5);
+            const count = Math.min(6, open.length);
+            for (let i = 0; i < count; i++) {
+                const [r, c] = open[i];
+                decorations.push({
+                    x: c * cell_size + cell_size / 2,
+                    y: r * cell_size + cell_size / 2,
+                    emoji: emojis[Math.floor(Math.random() * emojis.length)],
+                    size: cell_size * 0.5
+                });
+            }
+        }
+    
+        function resetStrokeState() {
+            drawing = false;
+            strokeLen = 0;
+            goalReached = false;
+            lastPos = null;
+            strokeSegments = [];
+            document.getElementById('message').textContent = '';
+        }
+    
+        function drawMaze() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (maze[r][c] === 1) {
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(c * cell_size, r * cell_size, cell_size, cell_size);
+                    } else {
+                        ctx.fillStyle = '#fff';
+                        ctx.fillRect(c * cell_size, r * cell_size, cell_size, cell_size);
+                    }
+                }
+            }
+    
+            // ランダム装飾絵文字
+            for (const d of decorations) {
+                ctx.font = `${d.size}px serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(d.emoji, d.x, d.y);
+            }
+    
+            // スタートとゴールのアイコン
+            const iconSize = cell_size * 0.9;
+            ctx.font = `${iconSize}px serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🐰', 1 * cell_size + cell_size / 2, 1 * cell_size + cell_size / 2);
+            ctx.fillText('🥕', (cols - 2) * cell_size + cell_size / 2, (rows - 2) * cell_size + cell_size / 2);
+
+            // 引いた線の履歴を再描画（紙吹雪アニメ中に消えないようにする）
+            ctx.strokeStyle = '#e74c3c';
+            ctx.lineWidth = cell_size * 0.4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            for (const [x1, y1, x2, y2] of strokeSegments) {
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+        }
+    
+        // ===== Step 2: なぞり描き =====
+        function canvasPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            // CSS表示サイズとcanvas内部サイズの差を吸収
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+    
+        function startStroke(x, y) {
+            if (goalReached) return;
+            drawing = true;
+            lastPos = { x, y };
+        }
+    
+        function continueStroke(x, y) {
+            if (!drawing || goalReached) return;
+            const dx = x - lastPos.x;
+            const dy = y - lastPos.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            strokeLen += dist;
+
+            // クレヨン風の太い線
+            ctx.strokeStyle = '#e74c3c';
+            ctx.lineWidth = cell_size * 0.4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(lastPos.x, lastPos.y);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            strokeSegments.push([lastPos.x, lastPos.y, x, y]);
+
+            lastPos = { x, y };
+            checkGoal(x, y);
+        }
+    
+        function endStroke() {
+            drawing = false;
+            lastPos = null;
+        }
+    
+        function checkGoal(x, y) {
+            if (goalReached) return;
+            if (strokeLen < cell_size * 5) return;
+            const gx = (cols - 2) * cell_size;
+            const gy = (rows - 2) * cell_size;
+            if (x >= gx && x <= gx + cell_size && y >= gy && y <= gy + cell_size) {
+                goalReached = true;
+                drawing = false;
+                document.getElementById('message').textContent = 'よくできました！🎉';
+                createConfetti();
+                playFanfare();
+            }
+        }
+    
+        function retryDraw() {
+            // 迷路は再生成せず、引いた線だけを消す
+            resetStrokeState();
+            drawMaze();
+        }
+    
+        // マウス操作
+        canvas.addEventListener('mousedown', (e) => {
+            initAudio();
+            const p = canvasPos(e);
+            startStroke(p.x, p.y);
+        });
+        canvas.addEventListener('mousemove', (e) => {
+            if (!drawing) return;
+            const p = canvasPos(e);
+            continueStroke(p.x, p.y);
+        });
+        canvas.addEventListener('mouseup', endStroke);
+        canvas.addEventListener('mouseleave', endStroke);
+    
+        // タッチ操作
+        canvas.addEventListener('touchstart', (e) => {
+            initAudio();
+            e.preventDefault();
+            const t = e.touches[0];
+            const p = canvasPos(t);
+            startStroke(p.x, p.y);
+        }, { passive: false });
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const t = e.touches[0];
+            const p = canvasPos(t);
+            continueStroke(p.x, p.y);
+        }, { passive: false });
+        canvas.addEventListener('touchend', endStroke);
+    
+        function nextStage() {
+            initGame(currentDifficulty);
+        }
+    
+        // Initial game
+        initGame('normal');
+    
+        function createConfetti() {
+            for (let i = 0; i < 50; i++) {
+                particles.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() - 0.5) * 4,
+                    color: `hsl(${Math.random() * 360}, 80%, 60%)`,
+                    size: Math.random() * 4 + 2,
+                    life: 180
+                });
+            }
+            if (!animationId) {
+                updateParticles();
+            }
+        }
+    
+        function updateParticles() {
+            if (particles.length === 0) {
+                if (animationId) {
+                    cancelAnimationFrame(animationId);
+                    animationId = null;
+                }
+                return;
+            }
+            
+            // Redraw background for every frame of confetti to avoid trails
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawMaze();
+            
+            particles.forEach((p, i) => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.1;
+                p.life--;
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                } else {
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            
+            animationId = requestAnimationFrame(updateParticles);
+        }
+    
+    </script>
+</body>
+</html>
