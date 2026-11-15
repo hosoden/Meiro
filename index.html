@@ -38,8 +38,8 @@
             color: white;
         }
         canvas {
-            background-color: white;
-            border: 5px solid #333;
+            background-color: #FFF9F0;
+            border: 5px solid #E3C9AF;
             box-shadow: 0 0 15px rgba(0,0,0,0.2);
             max-width: 100%;
             height: auto;
@@ -205,6 +205,9 @@
             // Ensure Start and End are paths
             maze[1][1] = 0;
             maze[rows - 2][cols - 2] = 0;
+            // 外周に「いりぐち（上）」と「でぐち（下）」の隙間を開ける
+            maze[0][1] = 0;
+            maze[rows - 1][cols - 2] = 0;
         }
     
         // Step 2: 通路セルにランダム絵文字を配置
@@ -244,17 +247,27 @@
     
         function drawMaze() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // 生成り色のやさしい背景
+            ctx.fillStyle = '#FFF9F0';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // 壁は塗りつぶしではなく、淡い水色の細い線で描く
+            ctx.strokeStyle = '#A9C7E8';
+            ctx.lineWidth = Math.max(3, cell_size * 0.15);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
             for (let r = 0; r < rows; r++) {
                 for (let c = 0; c < cols; c++) {
-                    if (maze[r][c] === 1) {
-                        ctx.fillStyle = '#000';
-                        ctx.fillRect(c * cell_size, r * cell_size, cell_size, cell_size);
-                    } else {
-                        ctx.fillStyle = '#fff';
-                        ctx.fillRect(c * cell_size, r * cell_size, cell_size, cell_size);
-                    }
+                    if (maze[r][c] !== 1) continue;
+                    const x = c * cell_size;
+                    const y = r * cell_size;
+                    if (r === 0 || maze[r - 1][c] === 0) { ctx.moveTo(x, y); ctx.lineTo(x + cell_size, y); }
+                    if (r === rows - 1 || maze[r + 1][c] === 0) { ctx.moveTo(x, y + cell_size); ctx.lineTo(x + cell_size, y + cell_size); }
+                    if (c === 0 || maze[r][c - 1] === 0) { ctx.moveTo(x, y); ctx.lineTo(x, y + cell_size); }
+                    if (c === cols - 1 || maze[r][c + 1] === 0) { ctx.moveTo(x + cell_size, y); ctx.lineTo(x + cell_size, y + cell_size); }
                 }
             }
+            ctx.stroke();
     
             // ランダム装飾絵文字
             for (const d of decorations) {
@@ -269,8 +282,21 @@
             ctx.font = `${iconSize}px serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
+            // いりぐちは緑の円、でぐちはオレンジの円で色分け（4 歳児向け）
+            ctx.fillStyle = 'rgba(76, 175, 80, 0.35)';
+            ctx.beginPath();
+            ctx.arc(1 * cell_size + cell_size / 2, 1 * cell_size + cell_size / 2, cell_size * 0.85, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(255, 152, 0, 0.35)';
+            ctx.beginPath();
+            ctx.arc((cols - 2) * cell_size + cell_size / 2, (rows - 2) * cell_size + cell_size / 2, cell_size * 0.85, 0, Math.PI * 2);
+            ctx.fill();
             ctx.fillText('🐰', 1 * cell_size + cell_size / 2, 1 * cell_size + cell_size / 2);
             ctx.fillText('🥕', (cols - 2) * cell_size + cell_size / 2, (rows - 2) * cell_size + cell_size / 2);
+            // いりぐちの矢印（緑・下向き・上の隙間から中へ）
+            drawArrow(1.5 * cell_size, cell_size * 0.05, 1.5 * cell_size, cell_size * 0.95, '#4CAF50');
+            // でぐちの矢印（オレンジ・下向き・ゴールの下の隙間から外へ）
+            drawArrow((cols - 1.5) * cell_size, (rows - 0.95) * cell_size, (cols - 1.5) * cell_size, (rows - 0.05) * cell_size, '#FF9800');
 
             // 引いた線の履歴を再描画（紙吹雪アニメ中に消えないようにする）
             ctx.strokeStyle = '#e74c3c';
@@ -285,6 +311,26 @@
             }
         }
     
+        // 縦の矢印を描く: (x1,y1)から(x2,y2)へ、先端は下向き
+        function drawArrow(x1, y1, x2, y2, color) {
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = Math.max(3, cell_size * 0.18);
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+            // 矢先の三角形
+            const head = Math.max(6, cell_size * 0.28);
+            ctx.beginPath();
+            ctx.moveTo(x2, y2 + head * 0.4);
+            ctx.lineTo(x2 - head * 0.7, y2 - head * 0.3);
+            ctx.lineTo(x2 + head * 0.7, y2 - head * 0.3);
+            ctx.closePath();
+            ctx.fill();
+        }
+
         // ===== Step 2: なぞり描き =====
         function canvasPos(e) {
             const rect = canvas.getBoundingClientRect();

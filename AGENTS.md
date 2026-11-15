@@ -11,6 +11,8 @@ Single-file web game: 「おえかき迷路」 — a drawing maze game for kids 
 ## Architecture facts (not obvious from filenames)
 
 - Maze generation: recursive backtracker ("hole-digging") on odd-sized grids (easy 9×9 / normal 15×15 / hard 21×21). Data is a 2D array, `1 = wall, 0 = path`. Start `(1,1)`, goal `(rows-2, cols-2)` — both are odd coords, always reachable (verified by flood fill).
+- Entrance/exit for non-readers (4-year-olds): outer border has real gaps at `maze[0][1]` (entrance, above start) and `maze[rows-1][cols-2]` (exit, below goal). Entrance = green halo + downward arrow, exit = orange halo + downward arrow; color-coding is the primary affordance, rabbit/carrot are flavor.
+- Walls are drawn as thin pale-blue line segments on the edges between wall and path cells (NOT filled black blocks). Wall cells fully surrounded by walls draw nothing — that's intended.
 - Drawing state: strokes are accumulated incrementally on canvas; `strokeSegments` history exists ONLY so confetti animation (which clearRects every frame) can redraw the user's line. Don't remove it or the drawing vanishes mid-celebration.
 - Goal detection: requires accumulated stroke length ≥ `cell_size * 5` AND pointer inside the goal cell. No wall collision by design — kids draw freely.
 - Audio: Web Audio fanfare; `AudioContext` is created/resumed on every canvas mousedown/touchstart (autoplay policy).
